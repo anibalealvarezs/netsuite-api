@@ -1,0 +1,5 @@
+netsuite_consumer_id: # consumer_id
+netsuite_consumer_secret: # consumer_secret
+netsuite_token_id: # token_id
+netsuite_token_secret: # token_secret
+netsuite_account_id: # account_id
