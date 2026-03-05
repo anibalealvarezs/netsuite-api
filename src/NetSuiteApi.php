@@ -25,7 +25,7 @@ class NetSuiteApi extends OAuthV1Client
         string $tokenSecret,
         string $accountId,
     ) {
-        return parent::__construct(
+        parent::__construct(
             baseUrl: 'https://'.$accountId.'.suitetalk.api.netsuite.com',
             consumerId: $consumerId,
             consumerSecret: $consumerSecret,
@@ -34,6 +34,9 @@ class NetSuiteApi extends OAuthV1Client
             realm: $accountId,
             signatureMethod: SignatureMethod::HMAC_SHA256,
         );
+
+        $this->setResponseErrorDetector('o:errorDetails');
+        $this->setErrorMessageParser(fn ($data) => $data['o:errorDetails'][0]['detail'] ?? json_encode($data));
     }
 
     /**
@@ -54,7 +57,7 @@ class NetSuiteApi extends OAuthV1Client
      * @param int $sleep
      * @param array $customErrors
      * @param bool $ignoreAuth
-     * @return Response
+     * @return mixed
      * @throws GuzzleException
      */
     public function performRequest(
@@ -70,16 +73,13 @@ class NetSuiteApi extends OAuthV1Client
         bool $verify = false,
         bool $allowNewToken = true,
         string $pathToSave = "",
-        bool $stream = null,
-        ?array $errorMessageNesting = null, // Ex: ['error' => ['message']]
+        ?bool $stream = null,
+        mixed $errorMessageNesting = null,
         int $sleep = 0,
         array $customErrors = [], // Ex: ['403' => 'body'] or ['500' => 'code'] or ['404' => 'message']
         bool $ignoreAuth = false,
-    ): Response {
-
-        if (!$errorMessageNesting) {
-            $errorMessageNesting = ['o:errorDetails' => [['detail']]];
-        }
+        mixed $onFailure = null,
+    ): mixed {
 
         return parent::performRequest(
             method: $method,
@@ -99,6 +99,7 @@ class NetSuiteApi extends OAuthV1Client
             sleep: $sleep,
             customErrors: $customErrors,
             ignoreAuth: $ignoreAuth,
+            onFailure: $onFailure,
         );
     }
 
@@ -128,8 +129,7 @@ class NetSuiteApi extends OAuthV1Client
         int $offset = 0,
         int $limit = 1000,
         bool $expandSubResources = true,
-    ): array
-    {
+    ): array {
         // Request the spreadsheet data
         $response = $this->performRequest(
             method: "GET",
@@ -153,8 +153,7 @@ class NetSuiteApi extends OAuthV1Client
     public function getSalesOrder(
         int $id,
         bool $expandSubResources = true,
-    ): array
-    {
+    ): array {
         // Request the spreadsheet data
         $response = $this->performRequest(
             method: "GET",
@@ -178,8 +177,7 @@ class NetSuiteApi extends OAuthV1Client
         string $query,
         int $offset = 0,
         int $limit = 1000,
-    ): array
-    {
+    ): array {
         // Request the spreadsheet data
         $response = $this->performRequest(
             method: "POST",
@@ -189,7 +187,7 @@ class NetSuiteApi extends OAuthV1Client
                 "offset" => $offset,
             ],
             body: json_encode([
-                "q" => preg_replace("/\s+/", " ", preg_replace( "/\r|\n/", "", $query )),
+                "q" => preg_replace("/\s+/", " ", preg_replace("/\r|\n/", "", $query)),
             ]),
             headers: [
                 "Prefer" => "transient",
@@ -208,8 +206,7 @@ class NetSuiteApi extends OAuthV1Client
     public function getSuiteQLQueryAll(
         string $query,
         int $limit = 1000,
-    ): array
-    {
+    ): array {
         $offset = 0;
         $results = [
             'items' => [],
@@ -232,8 +229,7 @@ class NetSuiteApi extends OAuthV1Client
     public function getImagesForProducts(
         string $store,
         array $productsIds,
-    ): array
-    {
+    ): array {
         $imagesQuery = "SELECT * FROM itemimage WHERE sitelist = '".$store."' AND item IN (".implode(',', $productsIds).")";
         return $this->getSuiteQLQueryAll(
             query: $imagesQuery,
