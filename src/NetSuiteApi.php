@@ -235,4 +235,19 @@ class NetSuiteApi extends OAuthV1Client
             query: $imagesQuery,
         );
     }
+
+    public function getSuiteQLQueryAllAndProcess(
+        string $query,
+        callable $callback,
+        int $limit = 1000,
+    ): void {
+        $offset = 0;
+        do {
+            $response = $this->getSuiteQLQuery($query, $offset, $limit);
+            if (!empty($response['items'])) {
+                $callback($response['items']);
+            }
+            $offset += $limit;
+        } while ($response['hasMore'] ?? false);
+    }
 }
