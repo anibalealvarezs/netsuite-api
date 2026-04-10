@@ -4,3 +4,4 @@
 /bin/
 /phpstan.neon
 /.vscode/
+**/.php-cs-fixer.dist.php
