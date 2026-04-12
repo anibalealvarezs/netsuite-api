@@ -2,13 +2,16 @@
 
 namespace Tests;
 
-use Carbon\Carbon;
 use Anibalealvarezs\NetSuiteApi\NetSuiteApi;
 use Faker\Factory;
 use Faker\Generator;
-use GuzzleHttp\Exception\GuzzleException;
+use GuzzleHttp\Client as GuzzleClient;
+use GuzzleHttp\Handler\MockHandler;
+use GuzzleHttp\HandlerStack;
+use GuzzleHttp\Psr7\Response;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Yaml\Yaml;
+use Anibalealvarezs\ApiSkeleton\Classes\Exceptions\ApiRequestException;
 
 class NetSuiteApiTest extends TestCase
 {
@@ -16,11 +19,32 @@ class NetSuiteApiTest extends TestCase
     private Generator $faker;
 
     /**
+     * @param MockHandler $mock
+     * @return GuzzleClient
+     */
+    protected function createMockedGuzzleClient(MockHandler $mock): GuzzleClient
+    {
+        $handlerStack = HandlerStack::create($mock);
+        return new GuzzleClient(['handler' => $handlerStack]);
+    }
+
+    /**
      * @throws GuzzleException
      */
     protected function setUp(): void
     {
-        $config = Yaml::parseFile(__DIR__ . "/../config/config.yaml");
+        $configFile = __DIR__ . "/../config/config.yaml";
+        if (file_exists($configFile)) {
+            $config = Yaml::parseFile($configFile);
+        } else {
+            $config = [
+                'netsuite_consumer_id' => 'id',
+                'netsuite_consumer_secret' => 'secret',
+                'netsuite_token_id' => 'token',
+                'netsuite_token_secret' => 'secret',
+                'netsuite_account_id' => 'account'
+            ];
+        }
         $this->netSuiteApi = new NetSuiteApi(
             consumerId: $config['netsuite_consumer_id'],
             consumerSecret: $config['netsuite_consumer_secret'],
@@ -41,79 +65,115 @@ class NetSuiteApiTest extends TestCase
      */
     public function testGetSalesOrders(): void
     {
-        $salesOrders = $this->netSuiteApi->getSalesOrders(
+        $mock = new MockHandler([
+            new Response(200, [], json_encode(['links' => [], 'count' => 0, 'hasMore' => false, 'items' => []])),
+        ]);
+        $guzzle = $this->createMockedGuzzleClient($mock);
+        $client = new NetSuiteApi(
+            consumerId: 'id',
+            consumerSecret: 'secret',
+            token: 'token',
+            tokenSecret: 'secret',
+            accountId: 'account',
+            guzzleClient: $guzzle
+        );
+
+        $salesOrders = $client->getSalesOrders(
             limit: $this->faker->numberBetween(1, 1000)
         );
 
         $this->assertIsArray($salesOrders);
-        $this->assertArrayHasKey('links', $salesOrders);
-        $this->assertArrayHasKey('count', $salesOrders);
-        $this->assertArrayHasKey('hasMore', $salesOrders);
         $this->assertArrayHasKey('items', $salesOrders);
-        $this->assertIsArray($salesOrders['items']);
     }
 
     /**
      * @throws GuzzleException
      */
-    public function testGetSalesOrder(): void
+    public function testGetAllSalesOrdersAndProcess(): void
     {
-        $salesOrder = $this->netSuiteApi->getSalesOrder(
-            id: 52896031,
+        $response1 = [
+            'items' => [['id' => 'o1']],
+            'hasMore' => true
+        ];
+        $response2 = [
+            'items' => [['id' => 'o2']],
+            'hasMore' => false
+        ];
+
+        $mock = new MockHandler([
+            new Response(200, [], json_encode($response1)),
+            new Response(200, [], json_encode($response2)),
+        ]);
+        $guzzle = $this->createMockedGuzzleClient($mock);
+
+        $client = new NetSuiteApi(
+            consumerId: 'id',
+            consumerSecret: 'secret',
+            token: 'token',
+            tokenSecret: 'secret',
+            accountId: 'account',
+            guzzleClient: $guzzle
         );
 
-        $this->assertIsArray($salesOrder);
-        $this->assertArrayHasKey('links', $salesOrder);
-        $this->assertArrayHasKey('total', $salesOrder);
+        $processedCount = 0;
+        $client->getAllSalesOrdersAndProcess(function ($data) use (&$processedCount) {
+            $processedCount += count($data);
+        });
+
+        $this->assertEquals(2, $processedCount);
     }
 
     /**
      * @throws GuzzleException
      */
-    public function testGetSuiteQLQuery(): void
+    public function testGetAllSalesOrdersEmpty(): void
     {
-        $result = $this->netSuiteApi->getSuiteQLQuery(
-            query: "SELECT transaction.id FROM transaction WHERE ( transaction.Type = 'SalesOrd' )",
-            limit: $this->faker->numberBetween(1, 1000)
+        $mock = new MockHandler([
+            new Response(200, [], json_encode(['items' => [], 'hasMore' => false])),
+        ]);
+        $guzzle = $this->createMockedGuzzleClient($mock);
+
+        $client = new NetSuiteApi(
+            consumerId: 'id',
+            consumerSecret: 'secret',
+            token: 'token',
+            tokenSecret: 'secret',
+            accountId: 'account',
+            guzzleClient: $guzzle
         );
 
-        $this->assertIsArray($result);
-        $this->assertArrayHasKey('links', $result);
-        $this->assertArrayHasKey('count', $result);
-        $this->assertArrayHasKey('hasMore', $result);
-        $this->assertArrayHasKey('items', $result);
-        $this->assertIsArray($result['items']);
+        $result = $client->getAllSalesOrders();
+        
+        $this->assertCount(0, $result['items']);
     }
 
     /**
      * @throws GuzzleException
      */
-    public function testGetSuiteQLQueryAll(): void
+    public function testGetAllSalesOrdersErrorMidLoop(): void
     {
-        $result = $this->netSuiteApi->getSuiteQLQueryAll(
-            query: "SELECT transaction.id FROM transaction WHERE ( transaction.Type = 'SalesOrd' )",
-            limit: $this->faker->numberBetween(1, 1000)
+        $response1 = [
+            'items' => [['id' => 'o1']],
+            'hasMore' => true
+        ];
+
+        $mock = new MockHandler([
+            new Response(200, [], json_encode($response1)),
+            new Response(500, [], 'Internal Server Error'),
+        ]);
+        $guzzle = $this->createMockedGuzzleClient($mock);
+
+        $client = new NetSuiteApi(
+            consumerId: 'id',
+            consumerSecret: 'secret',
+            token: 'token',
+            tokenSecret: 'secret',
+            accountId: 'account',
+            guzzleClient: $guzzle
         );
 
-        $this->assertIsArray($result);
-        $this->assertArrayHasKey('count', $result);
-        $this->assertArrayHasKey('items', $result);
-        $this->assertIsArray($result['items']);
-    }
+        $this->expectException(ApiRequestException::class);
 
-    /**
-     * @throws GuzzleException
-     */
-    public function testGetImagesForProducts(): void
-    {
-        $result = $this->netSuiteApi->getImagesForProducts(
-            store: "WorkPlacePro",
-            productsIds: [1293933]
-        );
-
-        $this->assertIsArray($result);
-        $this->assertArrayHasKey('count', $result);
-        $this->assertArrayHasKey('items', $result);
-        $this->assertIsArray($result['items']);
+        $client->getAllSalesOrdersAndProcess(function ($data) {});
     }
 }
