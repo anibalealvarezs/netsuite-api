@@ -16,6 +16,7 @@ class NetSuiteApi extends OAuthV1Client
      * @param string $token
      * @param string $tokenSecret
      * @param string $accountId
+     * @param \GuzzleHttp\Client|null $guzzleClient
      * @throws GuzzleException
      */
     public function __construct(
@@ -24,6 +25,7 @@ class NetSuiteApi extends OAuthV1Client
         string $token,
         string $tokenSecret,
         string $accountId,
+        ?\GuzzleHttp\Client $guzzleClient = null,
     ) {
         parent::__construct(
             baseUrl: 'https://'.$accountId.'.suitetalk.api.netsuite.com',
@@ -33,6 +35,7 @@ class NetSuiteApi extends OAuthV1Client
             tokenSecret: $tokenSecret,
             realm: $accountId,
             signatureMethod: SignatureMethod::HMAC_SHA256,
+            guzzleClient: $guzzleClient,
         );
 
         $this->setResponseErrorDetector('o:errorDetails');
@@ -143,6 +146,63 @@ class NetSuiteApi extends OAuthV1Client
         // Return response
         return json_decode($response->getBody()->getContents(), true);
     }
+
+    /**
+     * @param int $limit
+     * @param bool $expandSubResources
+     * @return array
+     * @throws GuzzleException
+     */
+    public function getAllSalesOrders(
+        int $limit = 1000,
+        bool $expandSubResources = true,
+    ): array {
+        $offset = 0;
+        $allOrders = [];
+        do {
+            $response = $this->getSalesOrders(
+                offset: $offset,
+                limit: $limit,
+                expandSubResources: $expandSubResources
+            );
+            if (!empty($response['items'])) {
+                $allOrders = array_merge($allOrders, $response['items']);
+            }
+            $offset += $limit;
+        } while ($response['hasMore'] ?? false);
+
+        return [
+            'items' => $allOrders,
+            'count' => count($allOrders)
+        ];
+    }
+
+    /**
+     * @param callable $callback
+     * @param int $limit
+     * @param bool $expandSubResources
+     * @return void
+     * @throws GuzzleException
+     */
+    public function getAllSalesOrdersAndProcess(
+        callable $callback,
+        int $limit = 1000,
+        bool $expandSubResources = true,
+    ): void {
+        $offset = 0;
+        do {
+            $response = $this->getSalesOrders(
+                offset: $offset,
+                limit: $limit,
+                expandSubResources: $expandSubResources
+            );
+            if (!empty($response['items'])) {
+                $callback($response['items']);
+            }
+            $offset += $limit;
+        } while ($response['hasMore'] ?? false);
+    }
+
 
     /**
      * @param int $id
